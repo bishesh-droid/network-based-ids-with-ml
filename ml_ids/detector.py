@@ -11,17 +11,18 @@ class MLIntrusionDetector:
     A Network Intrusion Detection System (NIDS) that uses machine learning
     to detect anomalous network traffic.
     """
-    def __init__(self, interface=NETWORK_INTERFACE, pcap_file=None):
+    def __init__(self, interface=NETWORK_INTERFACE, pcap_file=None, model_path=None):
         """
         Initializes the MLIntrusionDetector.
 
         Args:
             interface (str): The network interface to sniff on.
             pcap_file (str, optional): Path to a PCAP file to read packets from instead of live sniffing.
+            model_path (str, optional): Path to the pre-trained ML model.
         """
         self.interface = interface
         self.pcap_file = pcap_file
-        self.model = load_model()
+        self.model = load_model(model_path)
         self.stop_event = threading.Event() # For graceful shutdown
 
         if self.pcap_file:
@@ -29,48 +30,66 @@ class MLIntrusionDetector:
         else:
             ml_ids_logger.info(f"[*] Initialized ML IDS on interface: {self.interface}")
 
+    def _get_protocol_name(self, packet):
+        """Returns the protocol name from the packet."""
+        if TCP in packet:
+            return "TCP"
+        elif UDP in packet:
+            return "UDP"
+        elif ICMP in packet:
+            return "ICMP"
+        else:
+            return str(packet[IP].proto)
+
+    def _log_packet_info(self, prediction, src_ip, dst_ip, protocol_name, src_port, dst_port, features):
+        """Logs information about the processed packet."""
+        log_level = "WARNING" if prediction == 1 else "INFO"
+        status = "Anomalous" if prediction == 1 else "Normal"
+
+        message = (
+            f"[{status.upper()}] {status} traffic detected!\n"
+            f"        Source: {src_ip}:{src_port} -> Destination: {dst_ip}:{dst_port} (Protocol: {protocol_name})\n"
+            f"        Features: {features}"
+        )
+
+        if log_level == "WARNING":
+            ml_ids_logger.warning(message)
+        else:
+            ml_ids_logger.info(message)
+
     def _process_packet(self, packet):
         """
         Processes a single captured packet.
         Extracts features and uses the ML model to predict if it's anomalous.
         """
-        if IP in packet:
-            try:
-                features = extract_features(packet)
-                prediction = self.model.predict(features)[0]
+        if IP not in packet:
+            ml_ids_logger.debug("Non-IP packet received, skipping.")
+            return
 
-                src_ip = packet[IP].src
-                dst_ip = packet[IP].dst
-                protocol = packet[IP].proto
+        try:
+            features = extract_features(packet)
+            prediction = self.model.predict(features)[0]
 
-                if TCP in packet:
-                    src_port = packet[TCP].sport
-                    dst_port = packet[TCP].dport
-                    protocol_name = "TCP"
-                elif UDP in packet:
-                    src_port = packet[UDP].sport
-                    dst_port = packet[UDP].dport
-                    protocol_name = "UDP"
-                elif ICMP in packet:
-                    src_port = "N/A"
-                    dst_port = "N/A"
-                    protocol_name = "ICMP"
-                else:
-                    src_port = "N/A"
-                    dst_port = "N/A"
-                    protocol_name = str(protocol)
+            src_ip = packet[IP].src
+            dst_ip = packet[IP].dst
+            protocol_name = self._get_protocol_name(packet)
 
-                if prediction == 1: # Assuming 1 means anomalous/attack
-                    ml_ids_logger.warning(f"[ALERT] Anomalous traffic detected!")
-                    ml_ids_logger.warning(f"        Source: {src_ip}:{src_port} -> Destination: {dst_ip}:{dst_port} (Protocol: {protocol_name})")
-                    ml_ids_logger.warning(f"        Features: {features}")
-                else:
-                    ml_ids_logger.info(f"[NORMAL] Normal traffic: {src_ip}:{src_port} -> {dst_ip}:{dst_port} (Protocol: {protocol_name})")
+            src_port = packet.sport if packet.haslayer(TCP) or packet.haslayer(UDP) else "N/A"
+            dst_port = packet.dport if packet.haslayer(TCP) or packet.haslayer(UDP) else "N/A"
 
-            except Exception as e:
-                ml_ids_logger.error(f"[ERROR] Error processing packet: {e}")
-        # else:
-        #     ml_ids_logger.debug("Non-IP packet received.")
+            self._log_packet_info(prediction, src_ip, dst_ip, protocol_name, src_port, dst_port, features)
+
+        except Exception as e:
+            ml_ids_logger.error(f"[ERROR] Error processing packet: {e}")
+
+    def _sniff_live(self, count):
+        """Starts live packet sniffing."""
+        ml_ids_logger.info(f"[*] Starting live packet sniffing on {self.interface}...")
+        try:
+            sniff(iface=self.interface, prn=self._process_packet, store=0, count=count, stop_filter=lambda p: self.stop_event.is_set())
+        except Exception as e:
+            ml_ids_logger.critical(f"[CRITICAL] Error during live sniffing on {self.interface}: {e}")
+            ml_ids_logger.critical("        Ensure you have sufficient permissions (e.g., run as root/administrator) and the interface name is correct.")
 
     def start_sniffing(self, count=0):
         """
@@ -85,15 +104,8 @@ class MLIntrusionDetector:
                 sniff(offline=self.pcap_file, prn=self._process_packet, store=0, count=count)
             except Exception as e:
                 ml_ids_logger.critical(f"[CRITICAL] Error reading PCAP file {self.pcap_file}: {e}")
-                return
         else:
-            ml_ids_logger.info(f"[*] Starting live packet sniffing on {self.interface}...")
-            try:
-                sniff(iface=self.interface, prn=self._process_packet, store=0, count=count, stop_filter=lambda p: self.stop_event.is_set())
-            except Exception as e:
-                ml_ids_logger.critical(f"[CRITICAL] Error during live sniffing on {self.interface}: {e}")
-                ml_ids_logger.critical("        Ensure you have sufficient permissions (e.g., run as root/administrator) and the interface name is correct.")
-                return
+            self._sniff_live(count)
 
     def stop(self):
         """

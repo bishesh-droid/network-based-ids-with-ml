@@ -2,33 +2,31 @@
 
 import logging
 import os
-from .config import LOG_FILE, LOG_DIR, VERBOSE_CONSOLE_OUTPUT
+from .config import LOG_FILE
 
-def setup_logging():
+def setup_logger(log_file=LOG_FILE):
     """
-    Configures logging for the ML-based IDS.
-    Logs to a file and optionally to the console.
+    Configures the logger for the ML-based NIDS.
+
+    Args:
+        log_file (str): Path to the log file.
     """
-    # Ensure log directory exists
-    os.makedirs(LOG_DIR, exist_ok=True)
+    # Create logs directory if it doesn't exist
+    log_dir = os.path.dirname(log_file)
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
 
-    # Create a logger
-    ml_ids_logger = logging.getLogger('ml_ids')
-    ml_ids_logger.setLevel(logging.INFO)
-    ml_ids_logger.propagate = False # Prevent messages from being passed to the root logger
+    # Configure logger
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler()
+        ]
+    )
 
-    # File handler
-    file_handler = logging.FileHandler(LOG_FILE)
-    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-    ml_ids_logger.addHandler(file_handler)
+    logger = logging.getLogger("ml_ids")
+    return logger
 
-    # Console handler (optional)
-    if VERBOSE_CONSOLE_OUTPUT:
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
-        ml_ids_logger.addHandler(console_handler)
-
-    return ml_ids_logger
-
-# Initialize logger when module is imported
-ml_ids_logger = setup_logging()
+ml_ids_logger = setup_logger()

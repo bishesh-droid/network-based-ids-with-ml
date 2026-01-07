@@ -35,17 +35,23 @@ class TestModel(unittest.TestCase):
     def test_extract_features_tcp(self):
         packet = self._create_mock_packet("192.168.1.1", "8.8.8.8", "TCP", payload_len=50, tcp_flags="SA")
         features = extract_features(packet)
-        # Expected features: [len, is_tcp, is_udp, is_icmp, has_raw, tcp_flags_sum, src_port, dst_port]
+        # Expected features: [len, ttl, is_tcp, is_udp, is_icmp, has_raw, tcp_flags_sum, src_port, dst_port, ip_flags, ip_frag]
         self.assertEqual(features[0][0], len(packet))
-        self.assertEqual(features[0][1], 1)
-        self.assertEqual(features[0][5], 18) # S=2, A=16 -> 18
+        self.assertEqual(features[0][1], 64)
+        self.assertEqual(features[0][2], 1)
+        self.assertEqual(features[0][6], 18) # S=2, A=16 -> 18
+        self.assertEqual(features[0][9], 0)
+        self.assertEqual(features[0][10], 0)
 
     def test_extract_features_udp(self):
         packet = self._create_mock_packet("192.168.1.2", "4.4.4.4", "UDP", payload_len=30)
         features = extract_features(packet)
         self.assertEqual(features[0][0], len(packet))
-        self.assertEqual(features[0][2], 1)
-        self.assertEqual(features[0][5], 0) # No TCP flags for UDP
+        self.assertEqual(features[0][1], 64)
+        self.assertEqual(features[0][3], 1)
+        self.assertEqual(features[0][6], 0) # No TCP flags for UDP
+        self.assertEqual(features[0][9], 0)
+        self.assertEqual(features[0][10], 0)
 
     @patch('pickle.dump')
     @patch('os.path.exists', return_value=False)

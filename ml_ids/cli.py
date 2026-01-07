@@ -2,8 +2,7 @@ import click
 import sys
 
 from .detector import MLIntrusionDetector
-from .config import NETWORK_INTERFACE
-from .logger import ml_ids_logger
+from .config import NETWORK_INTERFACE, MODEL_PATH, LOG_FILE
 
 @click.command()
 @click.option('--interface', '-i', default=NETWORK_INTERFACE,
@@ -12,7 +11,11 @@ from .logger import ml_ids_logger
               help='Path to a PCAP file to read packets from instead of live sniffing.')
 @click.option('--count', '-c', type=int, default=0,
               help='Number of packets to process (0 for indefinite).')
-def main(interface, pcap, count):
+@click.option('--model-path', '-m', default=MODEL_PATH,
+              help=f'Path to the ML model (default: {MODEL_PATH}).')
+@click.option('--log-file', '-l', default=LOG_FILE,
+              help=f'Path to the log file (default: {LOG_FILE}).')
+def main(interface, pcap, count, model_path, log_file):
     """
     A Network-based Intrusion Detection System (NIDS) with Machine Learning.
 
@@ -21,7 +24,11 @@ def main(interface, pcap, count):
     """
     ml_ids_logger.info("[*] Starting ML-based Intrusion Detection System...")
 
-    detector = MLIntrusionDetector(interface=interface, pcap_file=pcap)
+    # Setup logger
+    from .logger import setup_logger
+    ml_ids_logger = setup_logger(log_file)
+
+    detector = MLIntrusionDetector(interface=interface, pcap_file=pcap, model_path=model_path)
 
     # Handle graceful shutdown on Ctrl+C for live sniffing
     if not pcap:
