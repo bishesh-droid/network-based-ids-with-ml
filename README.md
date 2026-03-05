@@ -1,119 +1,168 @@
 # Network-based IDS with Machine Learning
 
-This project implements a conceptual Network-based Intrusion Detection System (NIDS) that leverages machine learning to detect anomalous network traffic. Unlike traditional signature-based IDS, this system aims to identify new and unknown threats by learning patterns of normal network behavior and flagging deviations.
+A Network-based Intrusion Detection System (NIDS) that uses a Random Forest classifier to detect anomalous network traffic in real time or from PCAP files.  Unlike signature-based systems, it learns what normal traffic looks like and flags statistical deviations — making it effective against novel/unknown attack patterns.
+
+---
 
 ## Features
 
--   **Packet Sniffing/PCAP Analysis:** Captures live network traffic from a specified interface or reads from a PCAP file using Scapy.
--   **Feature Extraction:** Extracts key numerical features from network packets (e.g., packet length, protocol types, TCP flags, ports).
--   **Machine Learning Inference:** Uses a simplified, pre-trained machine learning model (Decision Tree Classifier) to classify each packet as 'normal' or 'anomalous'.
--   **Anomaly Detection:** Alerts are generated for packets classified as anomalous, providing details about the packet and its extracted features.
--   **Logging:** Logs all detected anomalies and system activities.
--   **Command-Line Interface:** Easy-to-use CLI for starting the IDS and configuring the network interface or PCAP input.
+- **Live capture & PCAP analysis** — sniffs a network interface with Scapy or reads an offline `.pcap` file.
+- **13-feature vector extraction** — packet length, TTL, protocol flags, ports, IP header fields (ihl, ToS, fragment offset), and more.
+- **Random Forest classifier** — pre-trained model auto-loaded on startup; a balanced dummy model is trained and saved automatically if no model file is present.
+- **Threat classification** — anomalous packets are further categorised as: SYN Flood, Fragmentation Attack, Suspicious Port, Anomalous Payload, or generic Anomalous Traffic.
+- **Session statistics** — tracks total packets, anomaly count/rate, and per-protocol / per-threat-type breakdowns; summary printed at session end.
+- **Versioned model persistence** — the pickle file stores a `version` tag; any schema change triggers automatic retraining so stale models are never silently used.
+- **Structured logging** — separate file (DEBUG+) and console (INFO+) handlers; no duplicate-handler bugs.
+- **CLI** — `click`-based interface with `--verbose`, `--interface`, `--pcap`, `--count`, `--model-path`, and `--log-file` options.
+
+---
 
 ## Project Structure
 
 ```
 .
 ├── ml_ids/
-│   ├── __init__.py        # Package initialization
-│   ├── cli.py             # Command-line interface
-│   ├── detector.py        # Core logic for packet sniffing, feature extraction, and ML inference
-│   ├── model.py           # (Conceptual) ML model definition, training (dummy), and loading
-│   ├── logger.py          # Configures logging for the IDS
-│   └── config.py          # Configuration for network interface, model path, and logging
-├── logs/
-│   └── ml_ids.log         # Log file for IDS alerts
+│   ├── __init__.py     # Package init
+│   ├── cli.py          # Click-based command-line interface
+│   ├── config.py       # Central config (interface, paths, model version, threshold)
+│   ├── detector.py     # Core engine: PacketStats, MLIntrusionDetector
+│   ├── logger.py       # Logger setup (duplicate-handler-safe)
+│   └── model.py        # Feature extraction, ThreatType enum, model train/load
 ├── tests/
 │   ├── __init__.py
-│   └── test_detector.py   # Unit tests for feature extraction and (mocked) model inference
-├── .env.example           # Example environment variables
-├── .gitignore
+│   ├── test_detector.py  # 20 unit tests covering all major components
+│   └── test_main.py
 ├── conceptual_analysis.txt
-├── README.md
-└── requirements.txt
+├── .env.example
+├── .gitignore
+├── requirements.txt
+└── README.md
 ```
+
+---
 
 ## Prerequisites
 
--   Python 3.7+
--   `pip` for installing dependencies
--   **Scapy dependencies:** Scapy often requires `libpcap` (Linux/macOS) or WinPcap/Npcap (Windows). Ensure these are installed on your system.
-    -   **Linux:** `sudo apt-get install libpcap-dev` (Debian/Ubuntu) or `sudo yum install libpcap-devel` (RHEL/CentOS)
-    -   **Windows:** Install Npcap (recommended over WinPcap) from [nmap.org/npcap/](https://nmap.org/npcap/)
+- Python 3.8+
+- `libpcap` (Linux/macOS) or Npcap (Windows) for live capture:
+  - **Debian/Ubuntu:** `sudo apt-get install libpcap-dev`
+  - **Windows:** install Npcap from [nmap.org/npcap/](https://nmap.org/npcap/)
+
+---
 
 ## Installation
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/your-username/ML-based-NIDS.git
-    cd ML-based-NIDS
-    ```
+```bash
+git clone https://github.com/your-username/network-based-ids-with-ml.git
+cd network-based-ids-with-ml
 
-2.  **Create a virtual environment (recommended):**
-    ```bash
-    python -m venv venv
-    source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
-    ```
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
 
-3.  **Install the dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
+pip install -r requirements.txt
+```
+
+---
 
 ## Usage
 
-Run the ML-based IDS from the project root directory. **Note:** Packet sniffing typically requires root/administrator privileges.
+Live capture requires root / administrator privileges.
 
 ```bash
+# Live monitoring on the default interface (eth0)
 sudo python -m ml_ids.cli
+
+# Specific interface
+sudo python -m ml_ids.cli -i wlan0
+
+# Analyse a PCAP file (no root needed)
+python -m ml_ids.cli -p /path/to/capture.pcap
+
+# Process only 500 packets then print a session summary
+sudo python -m ml_ids.cli -c 500
+
+# Enable DEBUG console output
+sudo python -m ml_ids.cli -v
+
+# Custom model and log paths
+sudo python -m ml_ids.cli -m /opt/ids/model.pkl -l /var/log/ids.log
+
+# Stop live monitoring
+# Press Ctrl+C — a session summary is printed before exit
 ```
 
-**Examples:**
+### CLI options
 
--   **Start live monitoring on the default interface (eth0):**
-    ```bash
-    sudo python -m ml_ids.cli
-    ```
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--interface` | `-i` | `eth0` | Network interface for live sniffing |
+| `--pcap` | `-p` | — | PCAP file to analyse (skips live capture) |
+| `--count` | `-c` | `0` | Max packets (0 = unlimited) |
+| `--model-path` | `-m` | `ml_model.pkl` | Path to pickled ML model |
+| `--log-file` | `-l` | `logs/ml_ids.log` | Destination log file |
+| `--verbose` | `-v` | off | Show DEBUG messages on the console |
 
--   **Monitor a specific interface (e.g., wlan0):**
-    ```bash
-    sudo python -m ml_ids.cli -i wlan0
-    ```
+---
 
--   **Analyze packets from a PCAP file:**
-    ```bash
-    python -m ml_ids.cli -p /path/to/your/traffic.pcap
-    ```
+## How It Works
 
--   **Process a limited number of packets from live traffic:**
-    ```bash
-    sudo python -m ml_ids.cli -c 1000
-    ```
+1. **Feature extraction** (`model.extract_features`) — each IP packet is reduced to a 13-element numerical vector.
+2. **ML inference** — the `RandomForestClassifier` assigns a binary label: `0` (Normal) or `1` (Attack).
+3. **Threat classification** (`model.classify_threat`) — heuristic post-processing on the same feature vector maps anomalous packets to a human-readable threat category.
+4. **Statistics** — `PacketStats` accumulates counts per protocol and per threat type, reporting at session end.
 
--   **To stop live monitoring:** Press `Ctrl+C` in the terminal where it is running.
+### Feature vector (13 elements)
 
-**Monitoring Logs:**
-All detected anomalies and activities are logged to `logs/ml_ids.log` and optionally printed to the console.
+| Index | Feature | Notes |
+|-------|---------|-------|
+| 0 | Packet length | bytes |
+| 1 | IP TTL | |
+| 2 | Is TCP | 0/1 |
+| 3 | Is UDP | 0/1 |
+| 4 | Is ICMP | 0/1 |
+| 5 | Has Raw payload | 0/1 |
+| 6 | TCP flags sum | SYN=2, ACK=16, … |
+| 7 | Source port | 0 for non-TCP/UDP |
+| 8 | Destination port | 0 for non-TCP/UDP |
+| 9 | IP flags field | |
+| 10 | IP fragment offset | |
+| 11 | IP header length (ihl) | in 4-byte words |
+| 12 | IP ToS / DSCP byte | |
 
-## Ethical Considerations
-
--   **Authorization:** Only run this IDS on networks you own or have explicit permission to monitor. Unauthorized network monitoring can be illegal.
--   **Privacy:** Be mindful of the data you are capturing. Network traffic can contain sensitive information.
--   **Educational Purpose:** This tool is for educational and research purposes only. The ML model is a simplified demonstration. It is not a substitute for commercial, production-grade security solutions and should not be relied upon for real-world threat detection.
+---
 
 ## Testing
 
-To run the automated tests, execute the following command from the project's root directory:
-
 ```bash
-python -m unittest discover tests
+python -m unittest discover tests -v
 ```
 
-## Contributing
+21 tests covering feature extraction, model load/versioning, threat classification, packet processing, statistics tracking, and error handling.
 
-Contributions are welcome! Please feel free to open issues or submit pull requests.
+---
+
+## Configuration
+
+Edit `ml_ids/config.py` to change defaults without touching the CLI flags:
+
+```python
+NETWORK_INTERFACE = "eth0"      # Default sniffing interface
+MODEL_PATH        = "ml_model.pkl"
+LOG_FILE          = "logs/ml_ids.log"
+MODEL_VERSION     = "1.1"       # Bump to force model retraining on next start
+ANOMALY_THRESHOLD = 0.5         # Reserved for probability-threshold mode
+```
+
+---
+
+## Ethical Considerations
+
+- **Authorisation** — only monitor networks you own or have explicit written permission to analyse.
+- **Privacy** — captured traffic may contain credentials and personal data; handle logs accordingly.
+- **Educational purpose** — the bundled dummy model is a demonstration tool. Do not rely on it for production security decisions.
+
+---
 
 ## License
 
-This project is licensed under the MIT License.
+MIT
